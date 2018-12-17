@@ -1,0 +1,21 @@
+##########
+ #EXAMPLES#
+  ##########
+
+(TG1 <- data.frame(fatty.acid = c("P","S", "O"),
+                 multiplicity = c(1,1,1),
+                 signal = c(57,62,100)))
+  (TG1.regression.matrix <- regression.matrix(TG=TG1, fatty.acids = fatty.acids, gamma.values = gamma.values))
+  (TG.regioisomers <- constr.reg(TG=TG1, reg.matrix=TG1.regression.matrix))
+
+(TG2 <- data.frame(fatty.acid = c("P","O"),
+                 multiplicity = c(1,2),
+                 signal = c(16,100)))
+  (TG2.regression.matrix <- regression.matrix(TG=TG2, fatty.acids = fatty.acids, gamma.values = gamma.values))
+  (TG.regioisomers <- constr.reg(TG=TG2, reg.matrix=TG2.regression.matrix))
+
+(TG3 <- data.frame(fatty.acid = c("O","ALA"),
+                   multiplicity = c(2,1),
+                   signal = c(100,43)))
+  (TG3.regression.matrix <- regression.matrix(TG=TG3, fatty.acids = fatty.acids, gamma.values = gamma.values))
+  (TG.regioisomers <- constr.reg(TG=TG3, reg.matrix=TG3.regression.matrix))
