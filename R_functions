@@ -1,0 +1,206 @@
+#Author: David Bagloma
+#email: david.balgoma@ilk.uu.se
+#R Code and example files for the TAG platform described in ACA publication :
+#Title: "Modeling the Fragmentation Patterns of Triacylglycerides in Mass Spectrometry Allows the Quantification of the Regioisomers with a Minimal Number of Standards"
+# by David Balgoma, Ph.D.; Yann Guitton; Jason J Evans; Bruno Le Bizec; Gaud Dervilly-Pinel; Anne Meynier"
+#2018
+
+
+library(tcltk2)
+  ref.dir <- tk_choose.dir(default = "", caption = "Select the folder with the data")
+
+#Fatty acids and gamma values fitted for the Nantes dataset
+fatty.acids <- data.frame(read.csv(paste(ref.dir, "/fatty.acids.csv", sep="")))
+gamma.values <- data.frame(read.csv(paste(ref.dir, "/gamma.values.csv", sep="")))
+
+
+###########
+ #FUNCTIONS#
+  ###########
+
+regression.matrix <- function(TG, fatty.acids, gamma.values) {
+  
+  #Function to generate the regression matrix:
+    #input "TG" is a data frame with
+      #Column "fatty.acid" with the name of the fatty acids as column "abbreviation" in input "fatty.acids"
+      #Column "multiplicity" with the respective multiplicity of the fatty acids
+    #input "fatty.acids" is a data frame with
+      #Column "abbreviation" with the same syntaxis as column "fatty.acid" in input "TG"
+      #Column "group" with the group that refers to the structure. It should be present in input "gamma.values"
+    #input "gamma.values" is a data frame with
+      #Column "group" to describe the type of factor (position, structure of the fatty acid or interaction) that the parameter in column "gamma" describes
+
+  
+  #Condition to check if the fatty acids that we supply are in the dataframe of fatty acids
+  if(all(TG$fatty.acid %in% fatty.acids$abbreviation)) {
+    #condition to check if the multiplicity sums 3 fatty acids, and should be 1 or 2
+    if(sum(TG$multiplicity)==3 & all(TG$multiplicity%in%c(1,2))) {
+      #Condition to check if we have two or three different fatty acids
+      if(max(TG$multiplicity)==1) { # 3 different fatty acids
+        
+        #Matrix GAMMA, that predicts the tendenci of a fatty acid to be lost depending on its position (as in SM-C6)
+        
+          #Function position
+            P <- -(diag(3)-1)*gamma.values$gamma[gamma.values$group=="ext"]
+           
+          #Function struture
+            S <-  matrix(c(gamma.values$gamma[gamma.values$group%in%(fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[1]])],
+                           gamma.values$gamma[gamma.values$group%in%(fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[2]])],
+                           gamma.values$gamma[gamma.values$group%in%(fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[3]])]),
+                         3,3,byrow=T)
+          #Function interaction PUFAs: There should be at least two PUFAs
+            IN <- matrix(0,3,3)
+            PUFA.condition <- c(((fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[1]])%in%c("saturated", "monounsaturated"))==F,
+                                ((fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[2]])%in%c("saturated", "monounsaturated"))==F,
+                                ((fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[3]])%in%c("saturated", "monounsaturated"))==F)
+            if(sum(PUFA.condition)>1) {
+              IN[,PUFA.condition] <- gamma.values$gamma[gamma.values$group=="PUFA.interaction"]
+            }
+        
+          #matrix with the GAMMA values
+            GAMMA <- P+S+IN
+        
+        #Regression matrix according to SM-C3  
+          output <- -matrix(c(1,0,-1,-1,1,0,0,-1,1),3,3)%*%t(GAMMA)
+          colnames(output) <- paste("TG(rac-",
+                                    as.character(TG$fatty.acid)[c(2,1,1)],
+                                    "/",TG$fatty.acid,"/", 
+                                    as.character(TG$fatty.acid)[c(3,3,2)], ")",
+                                    sep="")
+          rownames(output) <- paste("SP.",
+                                    TG$fatty.acid, "/", as.character(TG$fatty.acid)[c(2,3,1)],
+                                    sep="")
+        
+      } else { #2 different fatty acids: non linear relationship to calculate the columns of the regression matrix and the calculations are done in a different order
+        
+        #Matrix GAMMA, that predicts the tendenci of a fatty acid to be lost depending on its position (first row is internal position, second row is external position)
+            
+          P <- matrix(0,2,2)
+          P[2,] <- gamma.values$gamma[gamma.values$group=="ext"]
+          
+        #Function struture
+          S <-  matrix(c(gamma.values$gamma[gamma.values$group%in%(fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[1]])],
+                         gamma.values$gamma[gamma.values$group%in%(fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[2]])]),
+                       2,2,byrow=T)
+        #Function interaction PUFAs: There should be at least two PUFAs
+          IN <- matrix(0,2,2)
+          PUFA.condition <- c(((fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[1]])%in%c("saturated", "monounsaturated"))==F,
+                              ((fatty.acids$group[fatty.acids$abbreviation %in% TG$fatty.acid[2]])%in%c("saturated", "monounsaturated"))==F)
+          if(sum(PUFA.condition*TG$multiplicity)>1) {
+            IN[,PUFA.condition] <- gamma.values$gamma[gamma.values$group=="PUFA.interaction"]
+          }
+          
+        #matrix with the GAMMA values
+          GAMMA <- P+S+IN  
+        
+        #In this case the equations are not linear. Every structural vector is calculted separately (SMC-4)
+          #A is the fatty acid with multiplicity 2
+            position.A <- which(TG$multiplicity==2)
+          #B is the fatty acid with multiplicity 1
+            position.B <- which(TG$multiplicity==1)
+          #Calculation of the possible independent SPs
+          SP.AB.TGAAB <- log(exp(-GAMMA[1,position.A])+exp(-GAMMA[2,position.A]))+GAMMA[2,position.B]-log(2)
+          
+          #Calculation of the possible independent SPs
+          SP.AB.TGABA <- GAMMA[1,position.B] - GAMMA[2,position.A]
+          
+        #Regression matrix according to SM-C4
+          output <- matrix(c(SP.AB.TGAAB, SP.AB.TGABA),2,2, byrow=T)
+          output[2,] <- -output[2,]
+          
+          colnames(output) <- paste("TG(rac-",
+                                    as.character(TG$fatty.acid)[position.A],
+                                    "/",as.character(TG$fatty.acid)[c(position.A,position.B)],"/", 
+                                    as.character(TG$fatty.acid)[c(position.B,position.A)], ")",
+                                    sep="")
+          
+          rownames(output) <- paste("SP.",
+                                    as.character(TG$fatty.acid)[c(position.A, position.B)], "/", as.character(TG$fatty.acid)[c(position.B, position.A)],
+                                    sep="")
+          
+          #The way we have calculated, the firs raw is always SP.A/B: if the fatty acid A was i second position, we reorder the rows
+          if(position.A==2) {
+            output <- output[c(2,1),]
+          }
+          
+        
+      }
+      
+    } else {
+      output <- "Multiplicity of the fatty acids is wrong"
+    }  
+  } else {
+    output <- "Error in the syntaxis of the fatty acids"
+  }
+  
+  return(output)
+}
+
+
+
+constr.reg <- function(TG, reg.matrix, perc=F) {
+  
+  #Function to quantify the signal of a mixture of regioisomers with multivariate constrained calibration (SM-B)
+    #input "TG" is a data frame with
+      #Column "fatty.acid" with the name of the fatty acids as column "abbreviation" in input "fatty.acids"
+      #Column "multiplicity" with the respective multiplicity of the fatty acids
+      #Column "signal" with the signal of the neutral losses of the fatty acids
+    #input "reg.matrix" is a regression matrix
+      #the columns have the strucutral vectors of the pure regioisomers (SM-B). These vectos can be either the structural vectors of the pure regioisomers of the structural vectors generated by "reg.mat" function
+    #If "perc" is True, the output is reported as percentage, otherwise it is reported per unit
+  
+  
+  
+  #Condition to check if the fatty acids that we supply are in the dataframe of fatty acids
+  if(all(TG$fatty.acid %in% fatty.acids$abbreviation)) {
+    #condition to check if the multiplicity sums 3 fatty acids, and should be 1 or 2
+    if(sum(TG$multiplicity)==3 & all(TG$multiplicity%in%c(1,2))) {
+      
+      #Structural vector of the problem according to SM-B2
+      SV <- log(TG$signal/TG$multiplicity)
+        #Condition to check if we have two or three different fatty acids
+        if(max(TG$multiplicity)==1) { # 3 different fatty acids
+          SV <- SV-SV[c(2,3,1)]
+        } else { #2 different fatty acids
+          SV <- SV-SV[c(2,1)]
+        }
+      
+      n <- length(SV)
+      
+      #Multivriate constrained calibration
+      require(mgcv)
+      output <- pcls(list(y=SV,
+                          w=rep(1,n),
+                          X=reg.matrix,
+                          C=matrix(rep(1, n), ncol=n),
+                          S=list(),
+                          off=array(0,0),
+                          sp=array(0,0),
+                          p=rep(1/n,n),
+                          Ain=rbind(diag(n), -diag(n)),
+                          bin=c(rep(0,n),-rep(1,n))))
+      
+      output <- round(output,3)
+      names(output) <- colnames(reg.matrix)
+      
+      if(perc==T) {
+        output <- 100*output
+      }
+      
+    } else {
+      output <- "Multiplicity of the fatty acids is wrong"
+    }  
+  } else {
+    output <- "Error in the syntaxis of the fatty acids"
+  }
+  
+  return(output)
+  
+}  
+  
+
+
+
+
+
+
